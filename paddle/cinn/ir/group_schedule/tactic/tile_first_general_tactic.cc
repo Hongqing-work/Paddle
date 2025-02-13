@@ -414,7 +414,8 @@ void TileFirstGeneralTactic::VariableTypeAssignment(
     return context_->output_names.count(tensor_name) > 0;
   };
   const auto HasConsumers = [&](const ir::Expr& block) -> bool {
-    return !ir::analyzer::GetConsumerSBlocks(block, sch->GetRootBlock(block))
+    return !ir::analyzer::GetConsumerSBlocks(block,
+                                             sch->GetRootSchedStmt(block))
                 .empty();
   };
 

@@ -21,82 +21,82 @@
 #include "paddle/cinn/ir/ir.h"
 #include "paddle/cinn/ir/ir_base.h"
 #include "paddle/cinn/ir/ir_mutator.h"
+#include "paddle/cinn/ir/stmt.h"
 
 namespace cinn {
 namespace ir {
 namespace analyzer {
 
-bool HasBlock(const std::vector<Expr>& exprs, const std::string& block_name);
+bool HasSchedStmt(const std::vector<stmt::BlockRef>& root_blocks,
+                  const std::string& sched_name);
 
-std::vector<Expr> GetLoops(const std::vector<Expr>& exprs,
-                           const std::string& block_name);
+std::vector<stmt::For> GetLoops(const std::vector<stmt::BlockRef>& root_blocks,
+                                const std::string& sched_name);
 
-std::vector<Expr> GetLoops(const std::vector<Expr>& exprs, const Expr& block);
+std::vector<stmt::For> GetLoops(const std::vector<stmt::BlockRef>& root_blocks,
+                                const stmt::Schedule& target_sched);
 
-std::vector<Expr> GetAllBlocks(const std::vector<Expr>& exprs);
+std::vector<stmt::Schedule> GetAllSchedStmts(
+    const std::vector<stmt::BlockRef>& root_blocks);
 
-std::vector<Expr> GetChildBlocks(const Expr& expr);
+std::vector<stmt::Schedule> GetChildSchedStmts(const stmt::StmtRef& stmt);
 
-Expr GetBlock(const std::vector<Expr>& exprs, const std::string& block_name);
-
-/**
- * Get the root schedule block (i.e. ScheduleBlock(root)) from `expr`.
- * The `expr` must be the root block of ModuleExpr.
- */
-Expr GetRootSBlock(const Expr& expr);
-
-Expr GetRootBlock(const std::vector<Expr>& exprs, const Expr& expr);
-
-DeviceAPI GetDeviceAPI(const std::vector<Expr>& exprs);
-
-Expr AddUnitLoop(const std::vector<Expr>& exprs, const Expr& block);
-
-Expr GetStoreOfSBlock(const Expr& block);
-
-Tensor GetStoreTensorOfSBlock(const Expr& block);
-
-std::vector<Expr> GetConsumerSBlocks(const Expr& block, const Expr& root);
-
-std::vector<std::pair<Expr, Expr>> GetConsumerLoadsAndSBlocks(const Expr& block,
-                                                              const Expr& root);
-
-std::unordered_map<std::string, std::unordered_map<ir::Var, ir::Expr>>
-CollectVarToForMap(const std::vector<Expr>& exprs,
-                   const std::vector<Expr>& blocks);
-
-std::unordered_map<ir::Var, ir::Expr> GetIterVarToValueOfSBlock(ir::Expr block);
-
-ir::Expr ReplaceVarWithExpr(const ir::Expr& source,
-                            const std::vector<ir::Var>& candidates,
-                            const std::vector<ir::Expr>& targets);
+stmt::Schedule GetSchedStmt(const std::vector<stmt::BlockRef>& root_blocks,
+                            const std::string& sched_name);
 
 /**
- * Expand the iter_vars in `expr` to the iter_values of `block`.
+ * Get the root schedule stmt (i.e. Schedule(root)) from `root_block`.
+ * The `root_block` must be the root block of ScheduleModule.
  */
-Expr ExpandIterVar(const Expr& expr, const Expr& block);
+stmt::Schedule GetRootSchedStmt(const stmt::BlockRef& root_block);
+
+stmt::Schedule GetRootSchedStmt(const std::vector<stmt::BlockRef>& root_blocks,
+                                const stmt::StmtRef& stmt);
+
+DeviceAPI GetDeviceAPI(const std::vector<stmt::BlockRef>& root_blocks);
+
+stmt::For AddUnitLoop(const std::vector<stmt::BlockRef>& root_blocks,
+                      const stmt::Schedule& target_sched);
+
+stmt::Store GetStoreOfSchedStmt(const stmt::Schedule& target_sched);
+
+Tensor GetStoreTensorOfSchedStmt(const stmt::Schedule& target_sched);
+
+std::unordered_map<std::string, std::unordered_map<ir::Var, stmt::For>>
+CollectVarToForMap(const std::vector<stmt::BlockRef>& root_blocks,
+                   const std::vector<stmt::Schedule>& schedules);
+
+std::unordered_map<ir::Var, ir::Expr> GetIterVarToValueOfSchedStmt(
+    const stmt::Schedule& target_sched);
+
+template <typename T>
+T ReplaceVarWithExpr(const T& source,
+                     const std::vector<ir::Var>& candidates,
+                     const std::vector<ir::Expr>& targets);
+
+/**
+ * Expand the iter_vars in `stmt` to the iter_values of `iter_info_sched`.
+ */
+template <typename T>
+T ExpandIterVar(const T& source, const stmt::Schedule& iter_info_sched);
 
 constexpr char* kLoopVar = "loop_var_";
 
 /**
- * Replace the loop_vars in `expr` to the canonicalized form such that the
+ * Replace the loop_vars in `source` to the canonicalized form such that the
  * loop_var of loop[i] has name `loop_var_i`.
  */
-Expr CanonicalizeLoopVar(const Expr& expr, const std::vector<Expr>& loops);
+template <typename T>
+T CanonicalizeLoopVar(const T& source, const std::vector<stmt::For>& loops);
 
-std::vector<ir::Expr> GetIterValuesOfAccess(ir::Expr load_or_store,
-                                            ir::Expr block);
+std::unordered_set<ir::Var> GetReduceIterVars(
+    const stmt::Schedule& target_sched);
 
-std::unordered_set<ir::Var> GetReduceIterVars(ir::Expr block);
+bool IsReductionSchedStmt(const stmt::Schedule& target_sched);
 
-bool IsReductionSBlock(ir::Expr block);
-
-bool IsBroadcastSBlock(ir::Expr block);
+bool IsBroadcastSchedStmt(const stmt::Schedule& target_sched);
 
 std::vector<ir::Var> IndicesToVars(const std::vector<ir::Expr>& indices);
-
-void AnalyzeScheduleBlockReadWriteBuffer(ir::ScheduleBlock* sche_block);
-
-std::string GetBlockName(const ir::Expr block);
 
 }  // namespace analyzer
 }  // namespace ir

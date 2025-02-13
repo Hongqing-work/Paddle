@@ -61,37 +61,41 @@ void Mutate(StmtRef stmt,
   post_callback(stmt);
 }
 
-VisitResult Visit(
+VisitResult InterruptibleVisit(
     const BlockRef &block,
     const std::function<VisitResult(const StmtRef &)> &pre_callback,
     const std::function<VisitResult(const StmtRef &)> &post_callback) {
   for (const StmtRef &inner_stmt : block->stmts()) {
-    VisitResult nested_res = Visit(inner_stmt, pre_callback, post_callback);
+    VisitResult nested_res =
+        InterruptibleVisit(inner_stmt, pre_callback, post_callback);
     if (nested_res.WasInterrupted()) return VisitResult::interrupt();
   }
   return VisitResult::advance();
 }
 
-VisitResult Visit(
+VisitResult InterruptibleVisit(
     const StmtRef &stmt,
     const std::function<VisitResult(const StmtRef &)> &pre_callback,
     const std::function<VisitResult(const StmtRef &)> &post_callback) {
   VisitResult pre_res = pre_callback(stmt);
   if (pre_res.WasSkipped()) return VisitResult::advance();
   for (const BlockRef &inner_block : stmt->block_fields()) {
-    VisitResult nested_res = Visit(inner_block, pre_callback, post_callback);
+    VisitResult nested_res =
+        InterruptibleVisit(inner_block, pre_callback, post_callback);
     if (nested_res.WasInterrupted()) return VisitResult::interrupt();
   }
   return post_callback(stmt);
 }
 
-VisitResult Mutate(BlockRef block,
-                   const std::function<VisitResult(StmtRef)> &pre_callback,
-                   const std::function<VisitResult(StmtRef)> &post_callback) {
+VisitResult InterruptibleMutate(
+    BlockRef block,
+    const std::function<VisitResult(StmtRef)> &pre_callback,
+    const std::function<VisitResult(StmtRef)> &post_callback) {
   std::vector<StmtRef> stmts = block->stmts();
   VisitResult res = VisitResult::advance();
   for (StmtRef inner_stmt : stmts) {
-    VisitResult nested_res = Mutate(inner_stmt, pre_callback, post_callback);
+    VisitResult nested_res =
+        InterruptibleMutate(inner_stmt, pre_callback, post_callback);
     if (nested_res.WasInterrupted()) {
       res = VisitResult::interrupt();
       break;
@@ -101,9 +105,10 @@ VisitResult Mutate(BlockRef block,
   return res;
 }
 
-VisitResult Mutate(StmtRef stmt,
-                   const std::function<VisitResult(StmtRef)> &pre_callback,
-                   const std::function<VisitResult(StmtRef)> &post_callback) {
+VisitResult InterruptibleMutate(
+    StmtRef stmt,
+    const std::function<VisitResult(StmtRef)> &pre_callback,
+    const std::function<VisitResult(StmtRef)> &post_callback) {
   VisitResult pre_res = pre_callback(stmt);
   if (pre_res.WasSkipped()) return VisitResult::advance();
   VisitResult res = VisitResult::advance();
@@ -111,7 +116,7 @@ VisitResult Mutate(StmtRef stmt,
   for (const BlockRef &inner_block : stmt->block_fields()) {
     BlockRef new_inner_block = inner_block;
     if (!res.WasInterrupted())
-      res = Mutate(new_inner_block, pre_callback, post_callback);
+      res = InterruptibleMutate(new_inner_block, pre_callback, post_callback);
     new_blocks.emplace_back(new_inner_block);
   }
   stmt->set_block_fields(std::move(new_blocks));

@@ -14,60 +14,47 @@
 
 #include "paddle/cinn/ir/schedule/schedule_base.h"
 #include "paddle/cinn/ir/schedule/ir_schedule_util.h"
+#include "paddle/cinn/pass/pass_manager.h"
 
+using cinn::ir::stmt::BlockRef;
+using cinn::ir::stmt::StmtRef;
 namespace cinn {
 namespace ir {
+namespace {
+bool ReplaceRecursive(BlockRef block, const StmtRef& src, const StmtRef& tgt) {
+  std::vector<StmtRef> new_stmts;
+  bool replaced = false;
+  for (const auto& stmt : block->stmts()) {
+    if (stmt == src) {
+      new_stmts.push_back(tgt);
+      replaced = true;
+    } else {
+      new_stmts.push_back(stmt);
+    }
+    if (!replaced) {
+      for (BlockRef child_block : stmt->block_fields()) {
+        if (ReplaceRecursive(child_block, src, tgt)) {
+          replaced = true;
+          break;
+        }
+      }
+    }
+    if (replaced) break;
+  }
+  block->set_stmts(new_stmts);
+  return replaced;
+}
+}  // namespace
 
 /**
- * Replace a node to another node.
- * @param src_sref The node to be changed.
- * @param tgt_stmt The node we want.
+ * Replace a stmt to another stmt.
+ * @param src_stmt The stmt to be changed.
+ * @param tgt_stmt The stmt we want.
  */
-void ScheduleBase::Replace(const Expr& src_sref, const Expr& tgt_stmt) {
-  CHECK(src_sref.As<ir::For>() || src_sref.As<ir::Block>() ||
-        src_sref.As<ir::ScheduleBlockRealize>());
-  CHECK(tgt_stmt.As<ir::For>() || tgt_stmt.As<ir::Block>() ||
-        tgt_stmt.As<ir::ScheduleBlockRealize>());
-  if (src_sref == tgt_stmt) {
-    return;
-  }
-  struct ForLoopMutator : public ir::IRMutator<> {
-    ForLoopMutator(const Expr& source, const Expr& target)
-        : source_(source), target_(target) {}
-
-    void operator()(Expr* expr) { ir::IRMutator<>::Visit(expr, expr); }
-
-    void Visit(const ir::For* op, Expr* expr) override {
-      if (*expr == source_) {
-        *expr = target_;
-        return;
-      }
-      ir::IRMutator<>::Visit(op, expr);
-    }
-
-    void Visit(const ir::ScheduleBlockRealize* op, Expr* expr) override {
-      if (*expr == source_) {
-        *expr = target_;
-        return;
-      }
-      ir::IRMutator<>::Visit(op, expr);
-    }
-
-    void Visit(const ir::Block* op, Expr* expr) override {
-      if (*expr == source_) {
-        *expr = target_;
-        return;
-      }
-      ir::IRMutator<>::Visit(op, expr);
-    }
-
-    const Expr& source_;
-    const Expr& target_;
-  };
-  auto exprs = module_expr_.GetExprs();
-  ForLoopMutator mutator(src_sref, tgt_stmt);
-  for (auto& i : exprs) {
-    mutator(&i);
+void ScheduleBase::Replace(const StmtRef& src_stmt, const StmtRef& tgt_stmt) {
+  std::vector<BlockRef> root_blocks = sched_module_.GetBlocks();
+  for (BlockRef& block : root_blocks) {
+    ReplaceRecursive(block, src_stmt, tgt_stmt);
   }
 }
 

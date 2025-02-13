@@ -189,7 +189,7 @@ bool IsElementwiseOrBroadcast(const ir::Store& dst, const ir::Load& src) {
 }
 
 bool CheckAllElementwiseOrBroadcast(ir::IRSchedule* sch) {
-  for (auto& block : sch->GetAllBlocks()) {
+  for (auto& block : sch->GetAllSchedStmts()) {
     ir::Expr store = ir::analyzer::GetStoreOfSBlock(block);
     auto* store_node = store.As<ir::Store>();
     for (auto& load : CollectLoads(store_node->value)) {
@@ -216,7 +216,7 @@ std::vector<int> GetCommonBroadcastAxis(ir::IRSchedule* sch) {
   std::vector<int> common_broadcast_axis;
   bool is_first_op = true;
 
-  for (auto& block : sch->GetAllBlocks()) {
+  for (auto& block : sch->GetAllSchedStmts()) {
     std::vector<ir::Expr> loops = sch->GetLoops(block);
     std::unordered_map<ir::Var, int> var2loopidx =
         GetVar2LoopIdxMap(block, loops);

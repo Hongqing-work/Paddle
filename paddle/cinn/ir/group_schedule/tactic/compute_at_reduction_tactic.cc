@@ -243,7 +243,7 @@ void ComputeAtReductionTactic::Init(ScheduleContext* context,
   sch_ = std::make_unique<ir::IRSchedule>(*sch);
   graph_ = std::make_unique<ir::ScheduleBlockGraph>(*sch_);
 
-  for (auto& block : sch_->GetAllBlocks()) {
+  for (auto& block : sch_->GetAllSchedStmts()) {
     // Replace loop_vars to the unified form `$<loop_index>`
     std::vector<ir::Expr> loops = sch_->GetLoops(block);
     for (int i = 0; i < loops.size(); ++i) {
@@ -373,7 +373,7 @@ std::vector<std::string>
 ComputeAtReductionTactic::GetDependencyHarzardFreeBlocks(
     ir::IRSchedule* sch, const std::string& block_id) {
   std::vector<std::string> results;
-  std::vector<ir::Expr> blocks = sch->GetAllBlocks();
+  std::vector<ir::Expr> blocks = sch->GetAllSchedStmts();
   auto* graph_node = graph_->RetrieveNode(block_id);
   std::unordered_set<std::string> upstreams = graph_node->UpstreamNodes();
   std::unordered_set<std::string> downstreams = graph_node->DownstreamNodes();

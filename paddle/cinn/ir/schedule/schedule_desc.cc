@@ -340,10 +340,10 @@ struct ApplyFuncImpl<Return (*)(Args...), impl_fn> {
       ::cinn::ir::StepKindRegistry::Global()->__REGISTER_OR_GET__(#TypeName)
 
 // register StepKindInfo for every type of scheduling operation
-CINN_BUILD_STEP_KIND(GetAllBlocks)
+CINN_BUILD_STEP_KIND(GetAllSchedStmts)
     .SetApplyFn(APPLY_FUNC_UNIFORM(FREE_FUNCTION_CONVERTER(
         static_cast<std::vector<Expr> (IRSchedule::*)() const>(
-            &IRSchedule::GetAllBlocks))));
+            &IRSchedule::GetAllSchedStmts))));
 
 CINN_BUILD_STEP_KIND(GetChildBlocks)
     .Inputs({"expr"})
@@ -409,10 +409,10 @@ CINN_BUILD_STEP_KIND(ReverseComputeAt)
     .SetApplyFn(APPLY_FUNC_UNIFORM(
         FREE_FUNCTION_CONVERTER(&IRSchedule::ReverseComputeAt)));
 
-CINN_BUILD_STEP_KIND(GetRootBlock)
+CINN_BUILD_STEP_KIND(GetRootSchedStmt)
     .Inputs({"expr"})
-    .SetApplyFn(
-        APPLY_FUNC_UNIFORM(FREE_FUNCTION_CONVERTER(&IRSchedule::GetRootBlock)));
+    .SetApplyFn(APPLY_FUNC_UNIFORM(
+        FREE_FUNCTION_CONVERTER(&IRSchedule::GetRootSchedStmt)));
 
 CINN_BUILD_STEP_KIND(CacheRead)
     .Inputs({"block"})

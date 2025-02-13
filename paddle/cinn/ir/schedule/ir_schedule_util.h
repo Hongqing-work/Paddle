@@ -28,6 +28,7 @@
 #include "paddle/cinn/ir/ir_mutator.h"
 #include "paddle/cinn/ir/op/ir_operators.h"
 #include "paddle/cinn/ir/schedule/ir_schedule.h"
+#include "paddle/cinn/ir/stmt_visitors.h"
 #include "paddle/cinn/ir/tensor.h"
 #include "paddle/cinn/ir/utils/ir_copy.h"
 #include "paddle/cinn/optim/replace_var_with_expr.h"
@@ -139,7 +140,7 @@ void ReplaceExpr(Expr* source,
  */
 std::vector<int> ValidateFactors(const std::vector<int>& factors,
                                  int total_extent,
-                                 const ModuleExpr& module_expr);
+                                 const ScheduleModule& sched_module);
 
 void CHECKRfactorValidation(const Expr& rf_loop, int rf_axis);
 
@@ -1140,143 +1141,49 @@ struct MappingVarToExprMutator : public ir::IRMutator<> {
   const std::map<Var, Expr, CompVar>& replacing_map_;
 };
 
-struct FindBlocksVisitor {
-  explicit FindBlocksVisitor(const std::string& block_name = "")
-      : block_name_(block_name) {}
-
-  std::vector<Expr> operator()(const Expr* expr) {
-    Visit(expr);
-    return result;
-  }
-
- private:
-  void Visit(const Expr* expr) {
-    if (!expr->defined()) return;
-    if (!block_name_.empty() && !result.empty()) return;
-    if (expr->As<ir::For>()) {
-      Visit(&(expr->As<ir::For>()->body));
-    } else if (expr->As<ir::ScheduleBlockRealize>()) {
-      if (expr->As<ir::ScheduleBlockRealize>()
-              ->schedule_block.As<ScheduleBlock>()
-              ->name.substr(0, 4) != "root") {
-        auto* schedule_block = expr->As<ir::ScheduleBlockRealize>()
-                                   ->schedule_block.As<ir::ScheduleBlock>();
-        if (block_name_.empty() || schedule_block->name == block_name_) {
-          result.emplace_back(*expr);
+std::vector<stmt::Schedule> FindSchedStmt(const stmt::BlockRef& block,
+                                          const std::string& sched_name = "") {
+  std::vector<stmt::Schedule> result;
+  stmt::Visit(
+      block,
+      [&](const stmt::StmtRef& stmt) {
+        if (stmt.isa<stmt::Schedule>()) {
+          stmt::Schedule schedule = stmt.as<stmt::Schedule>();
+          if (sched_name.empty() || (sched_name == schedule->name()))
+            result.emplace_back(schedule);
         }
-      } else {
-        Visit(&(expr->As<ir::ScheduleBlockRealize>()->schedule_block));
-      }
-    } else if (expr->As<ir::ScheduleBlock>()) {
-      Visit(&(expr->As<ir::ScheduleBlock>()->body));
-    } else if (expr->As<ir::Block>()) {
-      for (auto& n : expr->As<ir::Block>()->stmts) Visit(&n);
-    } else if (expr->As<ir::IfThenElse>()) {
-      Visit(&(expr->As<ir::IfThenElse>()->true_case));
-      Visit(&(expr->As<ir::IfThenElse>()->false_case));
-    }
-  }
-  std::string block_name_;
-  std::vector<Expr> result{};
-};
+      },
+      [&](const stmt::StmtRef&) {});
+  return result;
+}
 
-struct FindLoopsVisitor {
-  explicit FindLoopsVisitor(const Expr& block) : block_(block) {}
-
-  std::vector<Expr> operator()(const Expr* expr) {
-    PADDLE_ENFORCE_NOT_NULL(
-        block_.As<ir::ScheduleBlockRealize>(),
-        ::common::errors::NotFound("The ScheduleBlockRealize cannot be null."));
-    visit_end = false;
-    Visit(expr);
-    return result;
-  }
-
- private:
-  void Visit(const Expr* expr) {
-    if (visit_end || !expr->defined()) return;
-    if (expr->As<ir::For>()) {
-      father_loops.emplace_back(*expr);
-      Visit(&(expr->As<ir::For>()->body));
-      father_loops.pop_back();
-    } else if (expr->As<ir::ScheduleBlockRealize>()) {
-      if (*expr == block_) {
-        result = father_loops;
-        visit_end = true;
-        return;
-      } else {
-        Visit(&(expr->As<ir::ScheduleBlockRealize>()->schedule_block));
-      }
-    } else if (expr->As<ir::ScheduleBlock>()) {
-      Visit(&(expr->As<ir::ScheduleBlock>()->body));
-    } else if (expr->As<ir::Block>()) {
-      for (auto& n : expr->As<ir::Block>()->stmts) Visit(&n);
-    } else if (expr->As<ir::IfThenElse>()) {
-      Visit(&(expr->As<ir::IfThenElse>()->true_case));
-      Visit(&(expr->As<ir::IfThenElse>()->false_case));
-    }
-  }
-
-  std::vector<Expr> father_loops{};
-  std::vector<Expr> result{};
-  bool visit_end{false};
-  const Expr& block_;
-};
-
-struct FindBlockParent : public ir::IRMutator<> {
- public:
-  explicit FindBlockParent(const std::string& block_name)
-      : block_name_(block_name) {}
-
-  void operator()(Expr* expr) { IRMutator::Visit(expr, expr); }
-
- private:
-  void Visit(const ir::Block* expr, Expr* op) override {
-    if (target_) return;
-    for (auto& stmt : expr->stmts) {
-      if (stmt.As<ir::ScheduleBlockRealize>()) {
-        if (stmt.As<ir::ScheduleBlockRealize>()
-                ->schedule_block.As<ir::ScheduleBlock>()
-                ->name == block_name_) {
-          target_ = op;
-          return;
+std::vector<stmt::For> FindParentLoops(const stmt::BlockRef& root,
+                                       const stmt::Schedule& target) {
+  std::vector<stmt::For> result;
+  std::vector<stmt::For> cur_for;
+  stmt::InterruptibleVisit(
+      root,
+      [&](const stmt::StmtRef& stmt) -> stmt::VisitResult {
+        if (stmt.isa<stmt::For>()) {
+          cur_for.emplace_back(stmt.as<stmt::For>());
         }
-      }
-    }
-    IRMutator::Visit(expr, op);
-  }
-
-  void Visit(const ir::For* expr, Expr* op) override {
-    if (target_) return;
-    if (expr->body.As<ir::ScheduleBlockRealize>()) {
-      if (expr->body.As<ir::ScheduleBlockRealize>()
-              ->schedule_block.As<ir::ScheduleBlock>()
-              ->name == block_name_) {
-        target_ = op;
-        return;
-      }
-    }
-    IRMutator::Visit(expr, op);
-  }
-
-  void Visit(const ir::ScheduleBlock* expr, Expr* op) override {
-    if (target_) return;
-    if (expr->body.As<ir::ScheduleBlockRealize>()) {
-      if (expr->body.As<ir::ScheduleBlockRealize>()
-              ->schedule_block.As<ir::ScheduleBlock>()
-              ->name == block_name_) {
-        target_ = op;
-        return;
-      }
-    }
-    IRMutator::Visit(expr, op);
-  }
-
-  std::string block_name_;
-
- public:
-  ir::Expr* target_{nullptr};
-};
+        if (stmt.isa<stmt::Schedule>()) {
+          stmt::Schedule cur_schedule = stmt.as<stmt::Schedule>();
+          if (cur_schedule == target) {
+            result = cur_for;
+            return stmt::VisitResult::interrupt();
+          }
+        }
+        return stmt::VisitResult::advance();
+      },
+      [&](const stmt::StmtRef& stmt) -> stmt::VisitResult {
+        if (stmt.isa<stmt::For>()) {
+          cur_for.pop_back();
+        }
+        return stmt::VisitResult::advance();
+      });
+  return result;
+}
 
 // The struct used to create all stmts after rfactor transformation.
 struct RfCreator : public ir::IRMutator<> {

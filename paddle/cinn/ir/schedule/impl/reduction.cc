@@ -43,7 +43,7 @@ Expr DyScheduleImpl::Rfactor(const Expr& rf_loop, int rf_axis) {
 
   CHECKRfactorValidation(rf_loop, rf_axis);
   // get root ScheduleBlockRealize
-  Expr root = GetRootBlock(rf_loop);
+  Expr root = GetRootSchedStmt(rf_loop);
   // create all stmts after rfactor transformation
   RfCreator rf_create(root, rf_loop, rf_axis);
   // return new created rfactor tensor
@@ -71,7 +71,7 @@ Expr DyScheduleImpl::FactorizeReduction(const Expr& rf_loop,
           blocks.size(),
           module_expr_.GetExprs()));
   Expr original_block = blocks.at(0);
-  Expr root_block = GetRootBlock(original_block);
+  Expr root_block = GetRootSchedStmt(original_block);
   // TODO(BiynXu): Add CheckReductionBlock()
 
   // Collect the loops of the block.

@@ -42,7 +42,7 @@ TEST(CrossBlockReductionReplacer, SRLayout) {
   ast_gen_ius::TensorGroup tensor_group({A, B, C});
   auto func = lang::LowerToAst("reduce_sum_sqrt", {C}, &tensor_group);
   ir::Expr expr_func_body = ir::ConvertStmtBlockToExprBlock(func->body_block);
-  ir::ModuleExpr mod_expr({expr_func_body});
+  ir::ScheduleModule mod_expr({expr_func_body});
   ir::IRSchedule ir_sch(mod_expr);
 
   ir_sch.Bind(ir_sch.GetLoops("B")[0], "blockIdx.x");
@@ -132,7 +132,7 @@ TEST(CrossBlockReductionReplacer, RSLayout) {
   auto func = lang::LowerToAst("reduce_max_exp", {C}, &tensor_group);
 
   ir::Expr expr_func_body = ir::ConvertStmtBlockToExprBlock(func->body_block);
-  ir::ModuleExpr mod_expr({expr_func_body});
+  ir::ScheduleModule mod_expr({expr_func_body});
   ir::IRSchedule ir_sch(mod_expr);
 
   ir_sch.Bind(ir_sch.GetLoops("B")[0], "blockIdx.x");

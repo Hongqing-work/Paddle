@@ -40,11 +40,11 @@ namespace cinn {
 namespace ir {
 
 void SimplifyBindingsInStaticShape(const cinn::ir::DyScheduleImpl* sch,
-                                   const Expr& loop,
+                                   const stmt::For& loop,
                                    const std::string& sch_name,
                                    Expr* stmt) {
   // Get outer loops of current loops.
-  Expr root = sch->GetRootBlock(loop);
+  Expr root = sch->GetRootSchedStmt(loop);
   std::vector<Expr> outer_loops = GetLoopsOfExpr(loop, root);
 
   // TODO(liujinnan): Deal dynamic shape.
@@ -65,32 +65,21 @@ void SimplifyBindingsInStaticShape(const cinn::ir::DyScheduleImpl* sch,
   }
 }
 
-std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
-                                        const std::vector<int>& factors) {
+std::vector<stmt::For> DyScheduleImpl::Split(const stmt::For& loop,
+                                             const std::vector<int>& factors) {
   CINN_IR_SCHEDULE_BEGIN();
   std::string primitive = "Split";
   std::ostringstream os;
 
-  PADDLE_ENFORCE_NOT_NULL(
-      loop.As<ir::For>(),
-      ::common::errors::InvalidArgument(
-          "[IRScheduleError] An error occurred in the schedule primitive "
-          "<Split>.\n"
-          "[Error info] Expr param(loop) must be For node!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
-
-  auto* for_node = loop.As<ir::For>();
-
   PADDLE_ENFORCE_EQ(
-      cinn::common::is_zero(for_node->min),
+      cinn::common::is_zero(loop->min()),
       true,
       ::common::errors::InvalidArgument(
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] The For node must start with 0!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   PADDLE_ENFORCE_EQ(
       factors.empty(),
@@ -99,20 +88,20 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] The factors param of Split should not be empty!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
-  if (loop.As<For>()->extent.is_constant()) {
-    int tot_extent = for_node->extent.get_constant();
+  if (loop->extent().is_constant()) {
+    int tot_extent = loop->extent().get_constant();
 
-    VLOG(3) << "Try Split loop from (" << for_node->loop_var->name << ", 0, "
+    VLOG(3) << "Try Split loop from (" << loop->loop_var()->name << ", 0, "
             << tot_extent << ") to (" << cinn::utils::Join(factors, ", ")
             << ") at loop:\n"
             << loop;
 
     std::vector<int> processed_factors;
     processed_factors =
-        ValidateFactors(factors, tot_extent, this->module_expr_);
+        ValidateFactors(factors, tot_extent, this->sched_module_);
     int prod_size = std::accumulate(processed_factors.begin(),
                                     processed_factors.end(),
                                     1,
@@ -120,29 +109,30 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
     std::vector<Var> new_loop_vars;
     Expr substitute_value(0);
     for (int i = 0; i < processed_factors.size(); ++i) {
-      Var temp_var(cinn::common::UniqName(for_node->loop_var->name));
+      Var temp_var(cinn::common::UniqName(loop->loop_var()->name));
       substitute_value =
           Expr(temp_var) + substitute_value * Expr(processed_factors[i]);
       new_loop_vars.push_back(temp_var);
     }
     substitute_value = optim::ArithSimplify(substitute_value);
-    Expr new_node = ir::ir_utils::IRCopy(for_node->body);
-    ReplaceExpr(&new_node, {for_node->loop_var}, {substitute_value});
-    std::vector<Expr> splited_loops;
-    splited_loops.resize(processed_factors.size());
+    stmt::BlockRef cur_block = ir::ir_utils::IRCopy(loop->body());
+    ReplaceExpr(&cur_block, {loop->loop_var()}, {substitute_value});
+    std::vector<stmt::BlockRef> splited_loop_bodys;
+    splited_loop_bodys.resize(processed_factors.size());
     if (tot_extent < prod_size) {
-      new_node = IfThenElse::Make(LT::Make(substitute_value, for_node->extent),
-                                  new_node);
+      stmt::IfThenElse if_stmt(LT::Make(substitute_value, loop->extent()),
+                               cur_block);
+      cur_block = stmt::BlockRef({if_stmt});
     }
     for (int i = processed_factors.size() - 1; i >= 0; i--) {
-      if (!new_node.As<ir::Block>()) new_node = Block::Make({new_node});
-      new_node = For::Make(new_loop_vars[i],
-                           Expr(0),
-                           Expr(processed_factors[i]),
-                           for_node->for_type(),
-                           for_node->device_api,
-                           new_node);
-      splited_loops[i] = new_node;
+      stmt::For cur_for(new_loop_vars[i],
+                        Expr(0),
+                        Expr(processed_factors[i]),
+                        loop->for_type(),
+                        loop->device_api(),
+                        cur_block);
+      cur_block = stmt::BlockRef({cur_for});
+      splited_loop_bodys[i] = cur_block;
     }
 
     SimplifyBindingsInStaticShape(this, loop, "split", &new_node);
@@ -152,9 +142,9 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
     return splited_loops;
   }
 
-  Expr tot_extent = for_node->extent;
+  Expr tot_extent = loop->extent;
 
-  VLOG(3) << "Try Split loop from (" << for_node->loop_var->name << ", 0, "
+  VLOG(3) << "Try Split loop from (" << loop->loop_var()->name << ", 0, "
           << tot_extent << ") to (" << cinn::utils::Join(factors, ", ")
           << ") at loop:\n"
           << loop;
@@ -195,8 +185,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[Error info] The params in factors of Split on dynamic shape should "
           "contains at "
           "most one '-1' and the rest of them should be positive!\n"
-          "[Expr info] The Expr of current schedule is: %s.",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s.",
+          sched_module_.GetBlocks()));
   PADDLE_ENFORCE_EQ(
       is_positive,
       true,
@@ -206,19 +196,19 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[Error info] The params in factors of Split on dynamic shape should "
           "contains at "
           "most one '-1' and the rest of them should be positive!\n"
-          "[Expr info] The Expr of current schedule is: %s.",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s.",
+          sched_module_.GetBlocks()));
 
   std::vector<Var> new_loop_vars;
   Expr substitute_value(0);
   for (int i = 0; i < process_factors.size(); ++i) {
-    Var temp_var(common::UniqName(for_node->loop_var->name));
+    Var temp_var(common::UniqName(loop->loop_var()->name));
     substitute_value = Expr(temp_var) + substitute_value * process_factors[i];
     new_loop_vars.push_back(temp_var);
   }
   substitute_value = optim::ArithSimplify(substitute_value);
-  Expr new_node = ir::ir_utils::IRCopy(for_node->body);
-  ReplaceExpr(&new_node, {for_node->loop_var}, {substitute_value});
+  Expr new_node = ir::ir_utils::IRCopy(loop->body());
+  ReplaceExpr(&new_node, {loop->loop_var()}, {substitute_value});
   std::vector<Expr> splited_loops;
   splited_loops.resize(process_factors.size());
 
@@ -232,8 +222,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
     new_node = For::Make(new_loop_vars[i],
                          Expr(0),
                          process_factors[i],
-                         for_node->for_type(),
-                         for_node->device_api,
+                         loop->for_type(),
+                         loop->device_api,
                          new_node);
     splited_loops[i] = new_node;
   }
@@ -247,8 +237,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
 }
 
 // TODO(@LiuYang): now -1 can't exist in factors.
-std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
-                                        const std::vector<Expr>& factors) {
+std::vector<stmt::For> DyScheduleImpl::Split(const stmt::For& loop,
+                                             const std::vector<Expr>& factors) {
   CINN_IR_SCHEDULE_BEGIN();
   std::string primitive = "Split";
   std::ostringstream os;
@@ -259,8 +249,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] Expr param(loop) must be For node!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   auto* for_node = loop.As<ir::For>();
 
@@ -271,8 +261,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] The For node must start with 0!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   PADDLE_ENFORCE_EQ(
       factors.empty(),
@@ -281,8 +271,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] The factors param of Split should not be empty!"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   PADDLE_ENFORCE_EQ(
       loop.As<ir::For>()->extent.is_constant(),
@@ -292,8 +282,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "<Split>.\n"
           "[Error info] Can't Split a loop with constant extent but with "
           "variable in factors!"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   Expr tot_extent = for_node->extent;
 
@@ -317,8 +307,8 @@ std::vector<Expr> DyScheduleImpl::Split(const Expr& loop,
           "[Error info] Product of factors can't be proved to be equal to the "
           "extent of "
           "current for loop! Please check!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   std::vector<Var> new_loop_vars;
   Expr substitute_value(0);
@@ -368,8 +358,8 @@ Expr DyScheduleImpl::Fuse(const std::vector<Expr>& loops) {
           "[IRScheduleError] An error occurred in the schedule primitive "
           "<Split>.\n"
           "[Error info] The loops param of Fuse should not be empty!\n"
-          "[Expr info] The Expr of current schedule is: %s. Please check!",
-          module_expr_.GetExprs()));
+          "[Module info] The Expr of current schedule is: %s. Please check!",
+          sched_module_.GetBlocks()));
 
   for (const Expr& it_loop : loops) {
     PADDLE_ENFORCE_NOT_NULL(
@@ -379,8 +369,8 @@ Expr DyScheduleImpl::Fuse(const std::vector<Expr>& loops) {
             "<Fuse>.\n"
             "[Error info] Loop in vector<Expr> param(loops) of Fuse must be "
             "For node!\n"
-            "[Expr info] The Expr of current schedule is: %s. Please check!",
-            module_expr_.GetExprs()));
+            "[Module info] The Expr of current schedule is: %s. Please check!",
+            sched_module_.GetBlocks()));
 
     if (!for_nodes.empty()) {
       PADDLE_ENFORCE_NOT_NULL(
@@ -389,8 +379,9 @@ Expr DyScheduleImpl::Fuse(const std::vector<Expr>& loops) {
               "[IRScheduleError] An error occurred in the schedule primitive "
               "<Fuse>.\n"
               "[Error info] The body of for node is not Block!\n"
-              "[Expr info] The Expr of current schedule is: %s. Please check!",
-              module_expr_.GetExprs()));
+              "[Module info] The Expr of current schedule is: %s. Please "
+              "check!",
+              sched_module_.GetBlocks()));
 
       PADDLE_ENFORCE_EQ(
           for_nodes.back()->body.As<ir::Block>()->stmts.size(),
@@ -399,8 +390,9 @@ Expr DyScheduleImpl::Fuse(const std::vector<Expr>& loops) {
               "[IRScheduleError] An error occurred in the schedule primitive "
               "<Fuse>.\n"
               "[Error info] The Block's size of for node is not 1!\n"
-              "[Expr info] The Expr of current schedule is: %s. Please check!",
-              module_expr_.GetExprs()));
+              "[Module info] The Expr of current schedule is: %s. Please "
+              "check!",
+              sched_module_.GetBlocks()));
 
       PADDLE_ENFORCE_EQ(
           for_nodes.back()->body.As<ir::Block>()->stmts[0],
@@ -410,8 +402,9 @@ Expr DyScheduleImpl::Fuse(const std::vector<Expr>& loops) {
               "<Fuse>.\n"
               "[Error info] The For nodes in loops param of Fuse must be "
               "adjacent!\n"
-              "[Expr info] The Expr of current schedule is: %s. Please check!",
-              module_expr_.GetExprs()));
+              "[Module info] The Expr of current schedule is: %s. Please "
+              "check!",
+              sched_module_.GetBlocks()));
     }
     for_nodes.push_back(it_loop.As<ir::For>());
     loop_vars.push_back(it_loop.As<ir::For>()->loop_var);
@@ -475,8 +468,9 @@ Expr DyScheduleImpl::Fuse(const std::string& block_name,
               "[IRScheduleError] An error occurred in the schedule primitive "
               "<Fuse>.\n"
               "[Error info] Loops index in Fuse should be continuous!\n"
-              "[Expr info] The Expr of current schedule is: %s. Please check!",
-              module_expr_.GetExprs()));
+              "[Module info] The Expr of current schedule is: %s. Please "
+              "check!",
+              sched_module_.GetBlocks()));
     }
   }
   for (int i : loops_index) {
@@ -487,8 +481,8 @@ Expr DyScheduleImpl::Fuse(const std::string& block_name,
                           "primitive <Fuse>.\n"
                           "[Error info] The loop index in Fuse should be less "
                           "than total loop's number!\n"
-                          "[Expr info] The Expr of current schedule is: %s.",
-                          module_expr_.GetExprs()));
+                          "[Module info] The Expr of current schedule is: %s.",
+                          sched_module_.GetBlocks()));
 
     PADDLE_ENFORCE_GE(
         i,
@@ -497,8 +491,8 @@ Expr DyScheduleImpl::Fuse(const std::string& block_name,
             "[IRScheduleError] An error occurred in the schedule primitive "
             "<Fuse>.\n"
             "[Error info] The loop index in Fuse should be >= 0!\n"
-            "[Expr info] The Expr of current schedule is: %s.",
-            module_expr_.GetExprs()));
+            "[Module info] The Expr of current schedule is: %s.",
+            sched_module_.GetBlocks()));
 
     loops_expr.emplace_back(all_loops[i]);
   }
@@ -523,8 +517,8 @@ Expr DyScheduleImpl::Fuse(const Expr& block,
               "[IRScheduleError] An error occurred in the schedule primitive "
               "<Fuse>.\n"
               "[Error info] Loops index in Fuse should be continuous!\n"
-              "[Expr info] The Expr of current schedule is: %s.",
-              module_expr_.GetExprs()));
+              "[Module info] The Expr of current schedule is: %s.",
+              sched_module_.GetBlocks()));
     }
   }
   for (int i : loops_index) {
@@ -535,8 +529,8 @@ Expr DyScheduleImpl::Fuse(const Expr& block,
                           "primitive <Fuse>.\n"
                           "[Error info] The loop index in Fuse should be less "
                           "than total loop's number!\n"
-                          "[Expr info] The Expr of current schedule is: %s.",
-                          module_expr_.GetExprs()));
+                          "[Module info] The Expr of current schedule is: %s.",
+                          sched_module_.GetBlocks()));
 
     PADDLE_ENFORCE_GT(i,
                       0,
@@ -544,8 +538,8 @@ Expr DyScheduleImpl::Fuse(const Expr& block,
                           "[IRScheduleError] An error occurred in the schedule "
                           "primitive <Fuse>.\n"
                           "[Error info] The loop index in Fuse should be > 0!\n"
-                          "[Expr info] The Expr of current schedule is: %s.",
-                          module_expr_.GetExprs()));
+                          "[Module info] The Expr of current schedule is: %s.",
+                          sched_module_.GetBlocks()));
 
     loops_expr.emplace_back(all_loops[i]);
   }
@@ -593,8 +587,8 @@ Expr DyScheduleImpl::Reorder(const std::string& block_name,
                           "primitive <Reorder>.\n"
                           "[Error info] The loop index in Reorder should be "
                           "less than total loop's number!\n"
-                          "[Expr info] The Expr of current schedule is: %s.",
-                          module_expr_.GetExprs()));
+                          "[Module info] The Expr of current schedule is: %s.",
+                          sched_module_.GetBlocks()));
 
     PADDLE_ENFORCE_GE(
         i,
@@ -603,8 +597,8 @@ Expr DyScheduleImpl::Reorder(const std::string& block_name,
             "[IRScheduleError] An error occurred in the schedule primitive "
             "<Reorder>.\n"
             "[Error info] The loop index in Reorder should be >= 0!\n"
-            "[Expr info] The Expr of current schedule is: %s.",
-            module_expr_.GetExprs()));
+            "[Module info] The Expr of current schedule is: %s.",
+            sched_module_.GetBlocks()));
 
     loops_expr.emplace_back(all_loops[i]);
   }
@@ -629,8 +623,8 @@ Expr DyScheduleImpl::Reorder(const Expr& block,
                           "primitive <Reorder>.\n"
                           "[Error info] The loop index in Reorder should be "
                           "less than total loop's number!\n"
-                          "[Expr info] The Expr of current schedule is: %s.",
-                          module_expr_.GetExprs()));
+                          "[Module info] The Expr of current schedule is: %s.",
+                          sched_module_.GetBlocks()));
 
     PADDLE_ENFORCE_GE(
         i,
@@ -639,8 +633,8 @@ Expr DyScheduleImpl::Reorder(const Expr& block,
             "[IRScheduleError] An error occurred in the schedule primitive "
             "<Reorder>.\n"
             "[Error info] The loop index in Reorder should be >= 0!\n"
-            "[Expr info] The Expr of current schedule is: %s.",
-            module_expr_.GetExprs()));
+            "[Module info] The Expr of current schedule is: %s.",
+            sched_module_.GetBlocks()));
 
     loops_expr.emplace_back(all_loops[i]);
   }

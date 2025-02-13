@@ -470,7 +470,7 @@ TEST_F(TestIterSimplify, SimplifyBindings) {
       {}, ir::ScheduleBlock::Make({}, {}, {}, "test1", body));
 
   // Create ir schedule
-  ir::ModuleExpr mod_expr({ir::Block::Make({body_outer})});
+  ir::ScheduleModule mod_expr({ir::Block::Make({body_outer})});
   ir::IRSchedule ir_sch(mod_expr);
   std::vector<ir::Expr> loops = ir_sch.GetLoops(body_);
 

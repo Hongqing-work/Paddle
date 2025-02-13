@@ -144,10 +144,14 @@ BucketLoweredFuncsWrapper OpLowererImpl::BucketLower(
   // =========== CodeGen And Optimizer ================
 
   // 2.Do group schedule.
-  ir::ModuleExpr mod_expr(func_bodies);
+  func_body_blocks.clear();
+  for (const auto& body : func_bodies) {
+    func_body_blocks.emplace_back(ir::ConvertExprBlockToStmtBlock(body));
+  }
+  ir::ScheduleModule mod_expr(func_bodies);
   ir::IRSchedule ir_sch(
       mod_expr, -1, false, cinn::utils::ErrorMessageLevel::kGeneral, true);
-  ir_sch.MergeExprs();
+  ir_sch.MergeBlocks();
   std::vector<std::pair<ir::SymbolicPredicate, ir::Expr>> cond2func_bodies;
   std::vector<int> priorities;
   VLOG(3) << "After lower, ir is: \n" << ir_sch.GetModule().GetExprs().at(0);
@@ -248,7 +252,7 @@ BucketLoweredFuncsWrapper OpLowererImpl::BucketLower(
 std::unordered_set<std::string> CollectStoreBufferNames(
     const std::vector<ir::Expr>& func_bodies) {
   std::unordered_set<std::string> buffer_names;
-  std::vector<ir::Expr> blocks = ir::analyzer::GetAllBlocks(func_bodies);
+  std::vector<ir::Expr> blocks = ir::analyzer::GetAllSchedStmts(func_bodies);
   for (const ir::Expr& block : blocks) {
     ir::Tensor tensor = ir::analyzer::GetStoreTensorOfSBlock(block);
     if (tensor->buffer.defined()) {
@@ -804,10 +808,10 @@ ir::Expr OpLowererImpl::LowerX86(const OpLoweringGroupPtr& group,
   for (const auto& body : func_bodies) {
     expr_func_bodies.emplace_back(ir::ConvertStmtBlockToExprBlock(body));
   }
-  ir::ModuleExpr mod_expr(expr_func_bodies);
+  ir::ScheduleModule mod_expr(expr_func_bodies);
   ir::IRSchedule ir_sch(
       mod_expr, -1, false, cinn::utils::ErrorMessageLevel::kGeneral, true);
-  ir_sch.MergeExprs();
+  ir_sch.MergeBlocks();
   auto X86Expr = ir::ir_utils::IRCopy(ir_sch.GetModule().GetExprs().at(0));
   return X86Expr;
 }

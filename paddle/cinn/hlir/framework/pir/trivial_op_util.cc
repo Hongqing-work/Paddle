@@ -989,7 +989,7 @@ ir::Expr ReshapeLoop(const ir::Expr& root,
                      const std::vector<symbol::DimExpr>& out_shape) {
   auto copied = ir::ir_utils::IRCopy(root);
 
-  ir::ModuleExpr mod_expr({copied});
+  ir::ScheduleModule mod_expr({copied});
   ir::IRSchedule ir_sch(
       mod_expr, -1, false, cinn::utils::ErrorMessageLevel::kGeneral, true);
 
@@ -1016,7 +1016,7 @@ ir::Expr ReshapeLoop(const ir::Expr& root,
                 << " for expr: \n"
                 << copied;
         copied = ExprTransformerUtils::RemoveOneTransformer(i)(copied);
-        ir_sch.SetExprs({copied});
+        ir_sch.SetBlocks({copied});
         for (auto& index : fuse_indices) {
           index--;
         }

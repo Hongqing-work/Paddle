@@ -67,23 +67,25 @@ class VisitResult {
   explicit VisitResult(ResultEnum result = Advance) : result(result) {}
 };
 
-VisitResult Visit(
+VisitResult InterruptibleVisit(
     const BlockRef &block,
     const std::function<VisitResult(const StmtRef &)> &pre_callback,
     const std::function<VisitResult(const StmtRef &)> &post_callback);
 
-VisitResult Visit(
+VisitResult InterruptibleVisit(
     const StmtRef &stmt,
     const std::function<VisitResult(const StmtRef &)> &pre_callback,
     const std::function<VisitResult(const StmtRef &)> &post_callback);
 
-VisitResult Mutate(BlockRef block,
-                   const std::function<VisitResult(StmtRef)> &pre_callback,
-                   const std::function<VisitResult(StmtRef)> &post_callback);
+VisitResult InterruptibleMutate(
+    BlockRef block,
+    const std::function<VisitResult(StmtRef)> &pre_callback,
+    const std::function<VisitResult(StmtRef)> &post_callback);
 
-VisitResult Mutate(StmtRef stmt,
-                   const std::function<VisitResult(StmtRef)> &pre_callback,
-                   const std::function<VisitResult(StmtRef)> &post_callback);
+VisitResult InterruptibleMutate(
+    StmtRef stmt,
+    const std::function<VisitResult(StmtRef)> &pre_callback,
+    const std::function<VisitResult(StmtRef)> &post_callback);
 
 #define CINN_CHECK_STMT_DEFINED(stmt)                                       \
   PADDLE_ENFORCE_EQ(                                                        \

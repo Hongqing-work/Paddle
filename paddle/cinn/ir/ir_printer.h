@@ -44,6 +44,8 @@ struct IrPrinter : public IRVisitorRequireReImpl<void>,
   //! Emit a expression list with , splitted.
   void Print(const std::vector<Expr> &exprs,
              const std::string &splitter = ", ");
+  void Print(const std::vector<stmt::BlockRef> &blocks,
+             const std::string &splitter = "\n");
   //! Emit a binary operator
   template <typename IRN>
   void PrintBinaryOp(const std::string &op, const BinaryOpNode<IRN> *x);
@@ -109,6 +111,8 @@ std::ostream &operator<<(std::ostream &os, const ir::LoweredFunc &func);
 
 namespace stmt {
 std::ostream &operator<<(std::ostream &os, const stmt::BlockRef &block);
+std::ostream &operator<<(std::ostream &os,
+                         const std::vector<stmt::BlockRef> &blocks);
 std::ostream &operator<<(std::ostream &os, const stmt::StmtRef &stmt);
 }  // namespace stmt
 

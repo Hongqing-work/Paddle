@@ -108,7 +108,7 @@ Expr DyScheduleImpl::CacheRead(const Expr& block,
         return os.str();
       }()));
 
-  auto root = GetRootBlock(block);
+  auto root = GetRootSchedStmt(block);
   ChangeBodyToBlock::Change(&root);
   Expr read_expr = GetNthAccessExpr(block, read_buffer_index, false);
 
@@ -169,7 +169,7 @@ Expr DyScheduleImpl::CacheWrite(const Expr& block,
         return os.str();
       }()));
 
-  auto root = GetRootBlock(block);
+  auto root = GetRootSchedStmt(block);
   ChangeBodyToBlock::Change(&root);
   Expr write_expr = GetNthAccessExpr(block, write_buffer_index, true);
 
@@ -272,7 +272,7 @@ void DyScheduleImpl::SyncThreads(const Expr& ir_node, bool after_node) {
         return os.str();
       }()));
 
-  auto root = GetRootBlock(ir_node);
+  auto root = GetRootSchedStmt(ir_node);
   ChangeBodyToBlock::Change(&root);
   Expr sync_threads = runtime::IntrinsicCall(Void(), "__syncthreads", {});
   InsertExpr::Insert(ir_node, sync_threads, after_node, &root);
@@ -335,7 +335,7 @@ void DyScheduleImpl::SetBuffer(Expr& block,  // NOLINT
     FixLocalBufferSize mutator(block.As<ir::ScheduleBlockRealize>()
                                    ->schedule_block.As<ir::ScheduleBlock>()
                                    ->name);
-    auto root = GetRootBlock(block);
+    auto root = GetRootSchedStmt(block);
     mutator(&root);
   }
   CINN_IR_SCHEDULE_END(this->err_msg_level_);
