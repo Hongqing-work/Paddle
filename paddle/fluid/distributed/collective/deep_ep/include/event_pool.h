@@ -14,24 +14,23 @@
 
 #pragma once
 
-#include <glog/logging.h>
-#include "paddle/fluid/distributed/collective/deep_ep/include/CUDAStream.h"
-#include "paddle/fluid/distributed/collective/deep_ep/include/event_pool.h"
+#include <deque>
+#include <mutex>
 #include "paddle/fluid/distributed/collective/deep_ep/kernels/exception.cuh"
 
 namespace deep_ep::detail {
 
-class Event {
+class EventPool {
  public:
-  Event() { cuda_event_ = *EventPool::instance().CreateCudaEventFromPool(); }
-  void record(const cudaStream_t& stream) {
-    CUDA_CHECK(cudaEventRecord(cuda_event_, stream));
-  }
+  EventPool() = default;
+  ~EventPool();
+  cudaEvent_t* CreateCudaEventFromPool();
 
-  cudaEvent_t cuda_event() const { return cuda_event_; }
+  static EventPool& instance();
 
  private:
-  cudaEvent_t cuda_event_;
+  std::deque<cudaEvent_t> incomplished_events_;
+  std::mutex mtx_;
 };
 
 }  // namespace deep_ep::detail
