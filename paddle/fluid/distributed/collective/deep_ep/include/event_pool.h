@@ -14,8 +14,8 @@
 
 #pragma once
 
-#include <deque>
 #include <mutex>
+#include <queue>
 #include "paddle/fluid/distributed/collective/deep_ep/kernels/exception.cuh"
 
 namespace deep_ep::detail {
@@ -23,13 +23,16 @@ namespace deep_ep::detail {
 class EventPool {
  public:
   EventPool() = default;
+  EventPool(const EventPool&) = delete;
+  EventPool(EventPool&&) = delete;
   ~EventPool();
-  cudaEvent_t* CreateCudaEventFromPool();
 
-  static EventPool& instance();
+  cudaEvent_t CreateCudaEventFromPool();
+
+  static EventPool& Instance();
 
  private:
-  std::deque<cudaEvent_t> incomplished_events_;
+  std::queue<cudaEvent_t> incomplished_events_;
   std::mutex mtx_;
 };
 

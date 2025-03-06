@@ -23,7 +23,7 @@ namespace deep_ep::detail {
 
 class Event {
  public:
-  Event() { cuda_event_ = *EventPool::instance().CreateCudaEventFromPool(); }
+  Event() { cuda_event_ = EventPool::Instance().CreateCudaEventFromPool(); }
   void record(const cudaStream_t& stream) {
     CUDA_CHECK(cudaEventRecord(cuda_event_, stream));
   }

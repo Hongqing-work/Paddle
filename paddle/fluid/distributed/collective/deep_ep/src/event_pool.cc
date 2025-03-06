@@ -17,55 +17,56 @@
 
 namespace deep_ep::detail {
 
-EventPool &EventPool::instance() {
+EventPool &EventPool::Instance() {
   static EventPool pool;
   return pool;
 }
 
 EventPool::~EventPool() {
-  const auto &DestroyEvent = [](cudaEvent_t *event) {
-    cudaError_t e = cudaEventDestroy(*event);
+  const auto &DestroyEvent = [](cudaEvent_t event) {
+    cudaError_t e = cudaEventDestroy(event);
     if (e != cudaSuccess) {
-      LOG(FATAL) << "CUDA event destroy failed: " << cudaGetErrorString(e);
+      LOG(ERROR) << "CUDA event destroy failed: ";
     }
   };
-  const auto &CheckComplishAndDestroy = [&](cudaEvent_t *event) -> bool {
-    if (cudaEventQuery(*event) == cudaSuccess) {
+  const auto &CheckComplishAndDestroy = [&](cudaEvent_t event) -> bool {
+    if (cudaEventQuery(event) == cudaSuccess) {
       DestroyEvent(event);
       return true;
     }
-    if (cudaEventDestroy(*event) == cudaErrorNotReady) {
-      LOG(FATAL) << "event is not completed or when destroying event pool.";
+    if (cudaEventQuery(event) == cudaErrorNotReady) {
+      LOG(ERROR) << "event is not completed or when destroying event pool.";
       return false;
     }
-    LOG(FATAL) << "failed on cudaEventQuery when destroying event pool.";
+    LOG(ERROR) << "failed on cudaEventQuery when destroying event pool.";
     return false;
   };
+  std::unique_lock<std::mutex> lock(mtx_);
   while (!incomplished_events_.empty()) {
-    cudaEvent_t *event = &(incomplished_events_.back());
+    cudaEvent_t event = incomplished_events_.front();
     if (!CheckComplishAndDestroy(event)) {
-      LOG(FATAL) << "failed on destroying event when destroying event pool.";
+      LOG(ERROR) << "failed on destroying event when destroying event pool.";
     }
-    incomplished_events_.pop_back();
+    incomplished_events_.pop();
   }
 }
 
-cudaEvent_t *EventPool::CreateCudaEventFromPool() {
-  std::lock_guard<std::mutex> guard(mtx_);
+cudaEvent_t EventPool::CreateCudaEventFromPool() {
+  std::unique_lock<std::mutex> lock(mtx_);
 
-  const auto &CreateNewEvent = [&]() -> cudaEvent_t * {
+  const auto &CreateNewEvent = [&]() -> cudaEvent_t {
     cudaEvent_t new_event;
     CUDA_CHECK(cudaEventCreate(&new_event));
-    incomplished_events_.push_back(new_event);
-    return &incomplished_events_.back();
+    incomplished_events_.push(new_event);
+    return new_event;
   };
 
-  const auto &CreateNewOrReuseEvent = [&]() -> cudaEvent_t * {
-    cudaEvent_t *event = &(incomplished_events_.front());
-    if (cudaEventQuery(*event) == cudaSuccess) {
-      incomplished_events_.pop_front();
-      incomplished_events_.push_back(*event);
-      return event;
+  const auto &CreateNewOrReuseEvent = [&]() -> cudaEvent_t {
+    cudaEvent_t front_event = incomplished_events_.front();
+    incomplished_events_.pop();
+    incomplished_events_.push(front_event);
+    if (cudaEventQuery(front_event) == cudaSuccess) {
+      return front_event;
     }
     return CreateNewEvent();
   };
