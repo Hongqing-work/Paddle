@@ -1,5 +1,11 @@
-set(SRCS deep_ep.cpp src/event_pool.cc kernels/internode.cu
-         kernels/intranode.cu kernels/runtime.cu)
+set(SRCS
+    deep_ep.cpp
+    src/event_pool.cc
+    src/event.cc
+    src/CUDAStream.cc
+    kernels/internode.cu
+    kernels/intranode.cu
+    kernels/runtime.cu)
 
 cc_library(
   deep_ep
